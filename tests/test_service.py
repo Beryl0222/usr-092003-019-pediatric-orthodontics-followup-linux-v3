@@ -5,15 +5,17 @@ import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
-from service import Handler, SERVICE_ID, SERVICE_NAME, health_payload
+from service import SERVICE_ID, SERVICE_NAME, build_app, health_payload
+
+_HANDLER = build_app()[3]
 
 
 class ServiceContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), _HANDLER)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
         cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
@@ -33,12 +35,21 @@ class ServiceContractTest(unittest.TestCase):
             self.assertEqual(json.load(response), health_payload())
 
     def test_unknown_route(self):
+        req = Request(
+            f"{self.base_url}/unknown",
+            headers={"X-Actor-Id": "a1", "X-Actor-Role": "clinic_admin"},
+        )
         with self.assertRaises(HTTPError) as error:
-            urlopen(f"{self.base_url}/unknown", timeout=2)
+            urlopen(req, timeout=2)
         self.assertEqual(error.exception.code, 404)
+        error.exception.close()
+
+    def test_business_route_requires_identity(self):
+        with self.assertRaises(HTTPError) as error:
+            urlopen(f"{self.base_url}/patients/x/clinic-view", timeout=2)
+        self.assertEqual(error.exception.code, 403)
         error.exception.close()
 
 
 if __name__ == "__main__":
     unittest.main()
-
